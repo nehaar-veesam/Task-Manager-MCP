@@ -1,45 +1,85 @@
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path 
-from datetime import datetime
-from typing import List, Optional, Dict
+from datetime import datetime, timedelta
 import json
-import os
 
 BASE_DIR = Path(__file__).resolve().parent
 TASK_DATA_FILE = BASE_DIR / "task_data.json"
 
 if not TASK_DATA_FILE.exists():
-    with open(TASK_DATA_FILE, "w") as f:
-        json.dump([], f)
+    with open(TASK_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump([], f, indent=4)
 
-with open(TASK_DATA_FILE, "r") as f:
-    task_data = json.load(f)
+
+def json_default(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"Type not serializable: {type(value)}")
+
+
+def load_task_data() -> list[dict]:
+    try:
+        with open(TASK_DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+            return []
+    except json.JSONDecodeError:
+        # Prevent server crash if a previous write was interrupted.
+        return []
+
+
+task_data = load_task_data()
 
 mcp = FastMCP(name="task-manager")
 
-"""
-Features
+# Util Functions
+def to_iso(value: datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
 
-create_task(title, description?, priority?)
-get_task(task_id)
-list_tasks()
-update_task(task_id, title?, description?, priority?)
-update_task_status(task_id, status)
-delete_task(task_id)
-"""
 
+def parse_due_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def normalize_due_input(due_at: str) -> str | None:
+    raw = (due_at or "").strip()
+    if not raw:
+        return None
+    try:
+        # Accept YYYY-MM-DD and full ISO timestamps.
+        parsed = datetime.fromisoformat(raw)
+        return parsed.isoformat()
+    except ValueError:
+        try:
+            parsed = datetime.strptime(raw, "%Y-%m-%d")
+            return parsed.isoformat()
+        except ValueError:
+            return None
 
 
 def save_task_data():
-    with open(TASK_DATA_FILE, "w") as f:
-        json.dump(task_data, f, indent=4)
+    with open(TASK_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(task_data, f, indent=4, default=json_default)
         
-
 
 #Create a new task
 @mcp.tool()
-def create_task(title: str, description: str, priority: str) -> str:
+def create_task(title: str, description: str, priority: str, due_at: str) -> str:
     """ Create a new task with given title, description and priority"""
+    normalized_due_at = normalize_due_input(due_at)
+    if due_at and normalized_due_at is None:
+        return "Invalid due_at format. Use YYYY-MM-DD or ISO datetime."
+
     new_task = {
         "id": len(task_data) + 1,
         "title": title,
@@ -48,11 +88,13 @@ def create_task(title: str, description: str, priority: str) -> str:
         "status": "todo",
         "created_at": f"{datetime.now()}",
         "updated_at": f"{datetime.now()}",
-        "completed_at": None
+        "completed_at": None,
+        "due_at": normalized_due_at
     }
     task_data.append(new_task)
     save_task_data()
     return f"Task Created Successfully for {new_task['id']} and title is {new_task['title']}"
+
 
 # Get Task information by task_id
 @mcp.tool()
@@ -63,11 +105,13 @@ def get_task(title: str, id: int):
             return task
     return f"Task not found with id {id} or title {title}"
 
+
 #List all tasks
 @mcp.tool()
 def list_tasks() -> list[dict]:
     """List all tasks available in the task_data"""
     return task_data
+
 
 #Update Task 
 @mcp.tool()
@@ -83,6 +127,7 @@ def update_task_status(id: int, title: str, status: str) -> str:
             return f"Task updated successfully for {task['id']} and title is {task['title']} and status is {task['status']}"
     return f"Task not present with id {id} or title {title}"
 
+
 # Update task information
 @mcp.tool()
 def update_task(id:int, title:str, description:str, priority:str) -> str:
@@ -97,6 +142,7 @@ def update_task(id:int, title:str, description:str, priority:str) -> str:
             return f"Task updated successfully for {task['id']} and title is {task['title']} and description is {task['description']} and priority is {task['priority']}"
     return f"Task not present with id {id} or title {title}"
 
+
 #Delete Task
 @mcp.tool()
 def delete_task(id:int, title:str) -> str:
@@ -105,10 +151,73 @@ def delete_task(id:int, title:str) -> str:
         if task['id'] == id or title == task['title']:
             task_data.remove(task)
             save_task_data()
-            return f"Task deleted successfully for {task['id']} and title is {task["title"]}"
+            return f"Task deleted successfully for {task['id']} and title is {task['title']}"
     return f"Task not present with id {id} or title {title}"
 
 
+#List Tasks by status
+@mcp.tool()
+def list_tasks_by_status(status:str):
+    """ List all tasks by status """
+    return [task for task in task_data if task["status"] == status]
+
+
+#List Tasks by Priority 
+@mcp.tool()
+def list_tasks_by_priority(priority:str):
+    """ List all tasks by priority """
+    return [task for task in task_data if task["priority"] == priority]
+
+
+# set_due_date for task 
+@mcp.tool()
+def set_due_date(task_id:int, due_at:str, title:str) -> dict:
+    """ Set the due date for a task """
+    normalized_due_at = normalize_due_input(due_at)
+    if normalized_due_at is None:
+        return {
+            "ok": False,
+            "error": "Invalid due_at format. Use YYYY-MM-DD or ISO datetime.",
+        }
+
+    for task in task_data:
+        if task["id"] == task_id or task["title"] == title:
+            task["due_at"] = normalized_due_at
+            task["updated_at"] = f"{datetime.now()}"
+            save_task_data()
+            return {
+                "ok": True,
+                "task_id": task["id"],
+                "title": task["title"],
+                "due_at": task["due_at"],
+            }
+    return {"ok": False, "error": f"Task not present with id {task_id} or title {title}"}
+
+
+#List Overdue Tasks
+@mcp.tool()
+def list_overdue_tasks(now:datetime) -> list[dict]:
+    """ List all overdue tasks """
+    overdue_tasks = []
+    now = datetime.now()
+    for task in task_data:
+        due_at = parse_due_at(task.get("due_at"))
+        if due_at and due_at < now:
+            overdue_tasks.append(task)
+    return overdue_tasks
+
+
+#List Due soon Tasks
+@mcp.tool()
+def list_due_soon_tasks(now:datetime) -> list[dict]:
+    """ List all due soon tasks where due_at is within next 24 hrs """
+    due_soon_tasks = []
+    now = datetime.now()
+    for task in task_data:
+        due_at = parse_due_at(task.get("due_at"))
+        if due_at and now < due_at < now + timedelta(hours=24):
+            due_soon_tasks.append(task)
+    return due_soon_tasks
 
 
 if __name__ == "__main__":
