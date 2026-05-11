@@ -11,3 +11,4 @@ wheels/
 
 # Task data
 task_data.json
+log_data.json

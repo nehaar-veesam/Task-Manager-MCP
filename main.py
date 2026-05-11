@@ -1,13 +1,27 @@
+"""
+Task Manager MCP Server 
+This server is used to manage tasks and log the actions performed on the tasks.
+
+Author: Nehaar Veesam
+"""
+
+import json
+import time
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path 
 from datetime import datetime, timedelta
-import json
+
 
 BASE_DIR = Path(__file__).resolve().parent
 TASK_DATA_FILE = BASE_DIR / "task_data.json"
+LOG_FILE = BASE_DIR / "log_data.json"
 
 if not TASK_DATA_FILE.exists():
     with open(TASK_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump([], f, indent=4)
+
+if not LOG_FILE.exists():
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, indent=4)
 
 
@@ -28,8 +42,19 @@ def load_task_data() -> list[dict]:
         # Prevent server crash if a previous write was interrupted.
         return []
 
+def load_log_data() -> list[dict]:
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+            return []
+    except json.JSONDecodeError:
+        # Prevent server crash if a previous write was interrupted.
+        return []
 
 task_data = load_task_data()
+log_data = load_log_data()
 
 mcp = FastMCP(name="task-manager")
 
@@ -67,14 +92,18 @@ def normalize_due_input(due_at: str) -> str | None:
             return None
 
 
-def save_task_data():
+def save_task_data(**kwargs):
+    log_data.append(kwargs)
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(log_data, f, indent=4, default=json_default)
+
     with open(TASK_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(task_data, f, indent=4, default=json_default)
         
 
 #Create a new task
 @mcp.tool()
-def create_task(title: str, description: str, priority: str, due_at: str) -> str:
+def create_task(title: str, description: str, priority: str, due_at: str, status: str) -> str:
     """ Create a new task with given title, description and priority"""
     normalized_due_at = normalize_due_input(due_at)
     if due_at and normalized_due_at is None:
@@ -85,14 +114,21 @@ def create_task(title: str, description: str, priority: str, due_at: str) -> str
         "title": title,
         "description": description, 
         "priority": priority,
-        "status": "todo",
+        "status": status,
         "created_at": f"{datetime.now()}",
         "updated_at": f"{datetime.now()}",
         "completed_at": None,
         "due_at": normalized_due_at
     }
     task_data.append(new_task)
-    save_task_data()
+    audit_data = {
+        "event_id": int(float(time.time())),
+        "timestamp": f"{datetime.now()}",
+        "action": "create_task",
+        "target_id": new_task["id"],
+        "actor":"system"
+    }
+    save_task_data(**audit_data)
     return f"Task Created Successfully for {new_task['id']} and title is {new_task['title']}"
 
 
@@ -123,7 +159,14 @@ def update_task_status(id: int, title: str, status: str) -> str:
             task["updated_at"] = f"{datetime.now()}"
             if status == "completed":
                 task["completed_at"] = f"{datetime.now()}"
-            save_task_data()
+            audit_data = {
+                "event_id": int(float(time.time())),
+                "timestamp": f"{datetime.now()}",
+                "action": "update_task_status",
+                "target_id": task["id"],
+                "actor":"system"
+            }
+            save_task_data(**audit_data)
             return f"Task updated successfully for {task['id']} and title is {task['title']} and status is {task['status']}"
     return f"Task not present with id {id} or title {title}"
 
@@ -138,7 +181,14 @@ def update_task(id:int, title:str, description:str, priority:str) -> str:
             task['description'] = description
             task['priority'] = priority
             task['updated_at'] = f"{datetime.now()}"
-            save_task_data()
+            audit_data = {
+                "event_id": int(float(time.time())),
+                "timestamp": f"{datetime.now()}",
+                "action": "update_task",
+                "target_id": task["id"],
+                "actor":"system"
+            }
+            save_task_data(**audit_data)
             return f"Task updated successfully for {task['id']} and title is {task['title']} and description is {task['description']} and priority is {task['priority']}"
     return f"Task not present with id {id} or title {title}"
 
@@ -150,7 +200,14 @@ def delete_task(id:int, title:str) -> str:
     for task in task_data:
         if task['id'] == id or title == task['title']:
             task_data.remove(task)
-            save_task_data()
+            audit_data = {
+                "event_id": int(float(time.time())),
+                "timestamp": f"{datetime.now()}",
+                "action": "delete_task",
+                "target_id": task["id"],
+                "actor":"system"
+            }
+            save_task_data(**audit_data)
             return f"Task deleted successfully for {task['id']} and title is {task['title']}"
     return f"Task not present with id {id} or title {title}"
 
@@ -184,7 +241,14 @@ def set_due_date(task_id:int, due_at:str, title:str) -> dict:
         if task["id"] == task_id or task["title"] == title:
             task["due_at"] = normalized_due_at
             task["updated_at"] = f"{datetime.now()}"
-            save_task_data()
+            audit_data = {
+                "event_id": int(float(time.time())),
+                "timestamp": f"{datetime.now()}",
+                "action": "set_due_date",
+                "target_id": task["id"],
+                "actor":"system"
+            }
+            save_task_data(**audit_data)
             return {
                 "ok": True,
                 "task_id": task["id"],
