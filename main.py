@@ -17,6 +17,9 @@ BASE_DIR = Path(__file__).resolve().parent
 TASK_DATA_FILE = BASE_DIR / "task_data.json"
 LOG_FILE = BASE_DIR / "log_data.json"
 
+# Metrics
+tool_request_count = 0
+
 if not TASK_DATA_FILE.exists():
     with open(TASK_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, indent=4)
@@ -115,19 +118,42 @@ def save_task_data(**kwargs):
         json.dump(task_data, f, indent=4, default=json_default)
         
 
+# Get Metrics 
+@mcp.tool()
+def get_total_request_count(token: str) -> dict:
+    """Get the total request count for the task manager"""
+    global tool_request_count
+    try:
+        if validate_token(token) == "admin":
+            return {
+                "total_request_count": tool_request_count
+            }
+        else:
+            return {"error": "You are not authorized to get the total request count"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+
 #Create a new task
 @mcp.tool()
 def create_task(token: str, title: str, description: str, priority: str, due_at: str, status: str) -> str:
     """ Create a new task with given title, description and priority"""
+    global tool_request_count
+    tool_request_count +=1
     user_role = validate_token(token)
     if user_role =="editor" or user_role == "admin":
         normalized_due_at = normalize_due_input(due_at)
         if due_at and normalized_due_at is None:
             return "Invalid due_at format. Use YYYY-MM-DD or ISO datetime."
-            
+
         existing_ids = [task["id"] for task in task_data]
+        if not existing_ids:
+            new_id = 1
+        else:
+            new_id = max(existing_ids)+1
         new_task = {
-            "id": max(existing_ids)+1,
+            "id": new_id,
             "title": title,
             "description": description, 
             "priority": priority,
@@ -158,6 +184,8 @@ def create_task(token: str, title: str, description: str, priority: str, due_at:
 @mcp.tool()
 def get_task(title: str, id: int):
     """ Get Task Information by task id"""
+    global tool_request_count
+    tool_request_count +=1
     for task in task_data:
         if task["id"] == id or title == task["title"]:
             return task
@@ -168,6 +196,8 @@ def get_task(title: str, id: int):
 @mcp.tool()
 def list_tasks() -> list[dict]:
     """List all tasks available in the task_data"""
+    global tool_request_count
+    tool_request_count +=1
     return task_data
 
 
@@ -175,6 +205,8 @@ def list_tasks() -> list[dict]:
 @mcp.tool()
 def update_task_status(token: str, id: int, title: str, status: str) -> str:
     "Update the task with given id , title and status"
+    global tool_request_count
+    tool_request_count +=1
     user_role = validate_token(token)
     if user_role =="editor" or user_role == "admin":
         for task in task_data:
@@ -202,6 +234,8 @@ def update_task_status(token: str, id: int, title: str, status: str) -> str:
 @mcp.tool()
 def update_task(token: str, id:int, title:str, description:str, priority:str) -> str:
     """Update the task with given id, title, description and priority"""
+    global tool_request_count
+    tool_request_count +=1
     user_role = validate_token(token)
     if user_role =="editor" or user_role == "admin":
         for task in task_data:
@@ -229,6 +263,8 @@ def update_task(token: str, id:int, title:str, description:str, priority:str) ->
 @mcp.tool()
 def delete_task(token: str, id:int, title:str) -> str:
     """Delete the task with given id and title"""
+    global tool_request_count
+    tool_request_count +=1
     user_role = validate_token(token)
     if user_role =="admin":
         for task in task_data:
@@ -254,6 +290,8 @@ def delete_task(token: str, id:int, title:str) -> str:
 @mcp.tool()
 def list_tasks_by_status(status:str):
     """ List all tasks by status """
+    global tool_request_count
+    tool_request_count +=1
     return [task for task in task_data if task["status"] == status]
 
 
@@ -261,6 +299,8 @@ def list_tasks_by_status(status:str):
 @mcp.tool()
 def list_tasks_by_priority(priority:str):
     """ List all tasks by priority """
+    global tool_request_count
+    tool_request_count +=1
     return [task for task in task_data if task["priority"] == priority]
 
 
@@ -268,6 +308,8 @@ def list_tasks_by_priority(priority:str):
 @mcp.tool()
 def set_due_date(token: str, task_id:int, due_at:str, title:str) -> dict:
     """ Set the due date for a task """
+    global tool_request_count
+    tool_request_count +=1
     user_role = validate_token(token)
     if user_role =="editor" or user_role == "admin":
         normalized_due_at = normalize_due_input(due_at)
@@ -305,6 +347,8 @@ def set_due_date(token: str, task_id:int, due_at:str, title:str) -> dict:
 @mcp.tool()
 def list_overdue_tasks(now:datetime) -> list[dict]:
     """ List all overdue tasks """
+    global tool_request_count
+    tool_request_count +=1
     overdue_tasks = []
     now = datetime.now()
     for task in task_data:
@@ -318,6 +362,8 @@ def list_overdue_tasks(now:datetime) -> list[dict]:
 @mcp.tool()
 def list_due_soon_tasks(now:datetime) -> list[dict]:
     """ List all due soon tasks where due_at is within next 24 hrs """
+    global tool_request_count
+    tool_request_count +=1
     due_soon_tasks = []
     now = datetime.now()
     for task in task_data:
