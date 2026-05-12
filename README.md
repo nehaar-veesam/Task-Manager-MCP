@@ -4,6 +4,14 @@ Simple setup guide for running this MCP server on **Windows** with the **Claude 
 
 This README is based on real issues faced during setup, so you can avoid the same errors.
 
+## Current features
+
+- Task CRUD operations from MCP tools
+- Status and priority-based task listing
+- Due date support with ISO date handling
+- Role-based access using tokens (`viewer`, `editor`, `admin`)
+- Audit logging for write actions in `log_data.json`
+
 ## Why this guide exists
 
 Some default MCP install flows did not work reliably with the Store version of Claude on this machine.  
@@ -96,6 +104,18 @@ Now open Claude again.
 
 In Claude chat, ask it to call `ping`.  
 Expected response: `pong`.
+
+## Token setup (required for protected tools)
+
+Create a `.env` file in project root and add:
+
+```env
+VIEWER_TOKEN=your_viewer_token
+EDITOR_TOKEN=your_editor_token
+ADMIN_TOKEN=your_admin_token
+```
+
+Use the token in tool calls for actions like create, update, delete, and set due date.
 
 ## Common problems and quick fixes
 

@@ -7,10 +7,11 @@ Author: Nehaar Veesam
 
 import json
 import time
+import os
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path 
 from datetime import datetime, timedelta
-
 
 BASE_DIR = Path(__file__).resolve().parent
 TASK_DATA_FILE = BASE_DIR / "task_data.json"
@@ -39,7 +40,6 @@ def load_task_data() -> list[dict]:
                 return data
             return []
     except json.JSONDecodeError:
-        # Prevent server crash if a previous write was interrupted.
         return []
 
 def load_log_data() -> list[dict]:
@@ -50,13 +50,27 @@ def load_log_data() -> list[dict]:
                 return data
             return []
     except json.JSONDecodeError:
-        # Prevent server crash if a previous write was interrupted.
         return []
 
 task_data = load_task_data()
 log_data = load_log_data()
 
 mcp = FastMCP(name="task-manager")
+
+
+# Validate Tokens
+def validate_token(token:str) -> str:
+    load_dotenv(BASE_DIR / ".env")
+    token = token.strip()
+    if token == os.getenv("VIEWER_TOKEN"):
+        return "viewer"
+    elif token == os.getenv("EDITOR_TOKEN"):
+        return "editor"
+    elif token == os.getenv("ADMIN_TOKEN"):
+        return "admin"
+    else:
+        return "Invalid Token"
+
 
 # Util Functions
 def to_iso(value: datetime | str | None) -> str | None:
@@ -103,33 +117,41 @@ def save_task_data(**kwargs):
 
 #Create a new task
 @mcp.tool()
-def create_task(title: str, description: str, priority: str, due_at: str, status: str) -> str:
+def create_task(token: str, title: str, description: str, priority: str, due_at: str, status: str) -> str:
     """ Create a new task with given title, description and priority"""
-    normalized_due_at = normalize_due_input(due_at)
-    if due_at and normalized_due_at is None:
-        return "Invalid due_at format. Use YYYY-MM-DD or ISO datetime."
-
-    new_task = {
-        "id": len(task_data) + 1,
-        "title": title,
-        "description": description, 
-        "priority": priority,
-        "status": status,
-        "created_at": f"{datetime.now()}",
-        "updated_at": f"{datetime.now()}",
-        "completed_at": None,
-        "due_at": normalized_due_at
-    }
-    task_data.append(new_task)
-    audit_data = {
-        "event_id": int(float(time.time())),
-        "timestamp": f"{datetime.now()}",
-        "action": "create_task",
-        "target_id": new_task["id"],
-        "actor":"system"
-    }
-    save_task_data(**audit_data)
-    return f"Task Created Successfully for {new_task['id']} and title is {new_task['title']}"
+    user_role = validate_token(token)
+    if user_role =="editor" or user_role == "admin":
+        normalized_due_at = normalize_due_input(due_at)
+        if due_at and normalized_due_at is None:
+            return "Invalid due_at format. Use YYYY-MM-DD or ISO datetime."
+            
+        existing_ids = [task["id"] for task in task_data]
+        new_task = {
+            "id": max(existing_ids)+1,
+            "title": title,
+            "description": description, 
+            "priority": priority,
+            "status": status,
+            "created_at": f"{datetime.now()}",
+            "updated_at": f"{datetime.now()}",
+            "completed_at": None,
+            "due_at": normalized_due_at
+        }
+        task_data.append(new_task)
+        audit_data = {
+            "event_id": int(float(time.time())),
+            "timestamp": f"{datetime.now()}",
+            "action": "create_task",
+            "target_id": new_task["id"],
+            "actor":"system"
+        }
+        save_task_data(**audit_data)
+        return f"Task Created Successfully for {new_task['id']} and title is {new_task['title']}"
+    elif user_role == "viewer":
+        return "You are not authorized to create tasks"
+    else:
+        return "Invalid Token provided"
+        
 
 
 # Get Task information by task_id
@@ -151,65 +173,81 @@ def list_tasks() -> list[dict]:
 
 #Update Task 
 @mcp.tool()
-def update_task_status(id: int, title: str, status: str) -> str:
+def update_task_status(token: str, id: int, title: str, status: str) -> str:
     "Update the task with given id , title and status"
-    for task in task_data:
-        if task["id"] == id or title == task["title"]:
-            task["status"] = status
-            task["updated_at"] = f"{datetime.now()}"
-            if status == "completed":
-                task["completed_at"] = f"{datetime.now()}"
-            audit_data = {
-                "event_id": int(float(time.time())),
-                "timestamp": f"{datetime.now()}",
-                "action": "update_task_status",
-                "target_id": task["id"],
-                "actor":"system"
-            }
-            save_task_data(**audit_data)
-            return f"Task updated successfully for {task['id']} and title is {task['title']} and status is {task['status']}"
-    return f"Task not present with id {id} or title {title}"
-
+    user_role = validate_token(token)
+    if user_role =="editor" or user_role == "admin":
+        for task in task_data:
+            if task["id"] == id or title == task["title"]:
+                task["status"] = status
+                task["updated_at"] = f"{datetime.now()}"
+                if status == "completed":
+                    task["completed_at"] = f"{datetime.now()}"
+                audit_data = {
+                    "event_id": int(float(time.time())),
+                    "timestamp": f"{datetime.now()}",
+                    "action": "update_task_status",
+                    "target_id": task["id"],
+                    "actor":"system"
+                }
+                save_task_data(**audit_data)
+                return f"Task updated successfully for {task['id']} and title is {task['title']} and status is {task['status']}"
+        return f"Task not present with id {id} or title {title}"
+    elif user_role == "viewer":
+        return "You are not authorized to create tasks"
+    else:
+        return "Invalid Token provided"
 
 # Update task information
 @mcp.tool()
-def update_task(id:int, title:str, description:str, priority:str) -> str:
+def update_task(token: str, id:int, title:str, description:str, priority:str) -> str:
     """Update the task with given id, title, description and priority"""
-    for task in task_data:
-        if task['id'] == id or title == task['title']:
-            task['title'] = title
-            task['description'] = description
-            task['priority'] = priority
-            task['updated_at'] = f"{datetime.now()}"
-            audit_data = {
-                "event_id": int(float(time.time())),
-                "timestamp": f"{datetime.now()}",
-                "action": "update_task",
-                "target_id": task["id"],
-                "actor":"system"
-            }
-            save_task_data(**audit_data)
-            return f"Task updated successfully for {task['id']} and title is {task['title']} and description is {task['description']} and priority is {task['priority']}"
-    return f"Task not present with id {id} or title {title}"
-
+    user_role = validate_token(token)
+    if user_role =="editor" or user_role == "admin":
+        for task in task_data:
+            if task['id'] == id or title == task['title']:
+                task['title'] = title
+                task['description'] = description
+                task['priority'] = priority
+                task['updated_at'] = f"{datetime.now()}"
+                audit_data = {
+                    "event_id": int(float(time.time())),
+                    "timestamp": f"{datetime.now()}",
+                    "action": "update_task",
+                    "target_id": task["id"],
+                    "actor":"system"
+                }
+                save_task_data(**audit_data)
+                return f"Task updated successfully for {task['id']} and title is {task['title']} and description is {task['description']} and priority is {task['priority']}"
+        return f"Task not present with id {id} or title {title}"
+    elif user_role == "viewer":
+        return "You are not authorized to create tasks"
+    else:
+        return "Invalid Token provided"
 
 #Delete Task
 @mcp.tool()
-def delete_task(id:int, title:str) -> str:
+def delete_task(token: str, id:int, title:str) -> str:
     """Delete the task with given id and title"""
-    for task in task_data:
-        if task['id'] == id or title == task['title']:
-            task_data.remove(task)
-            audit_data = {
-                "event_id": int(float(time.time())),
-                "timestamp": f"{datetime.now()}",
-                "action": "delete_task",
-                "target_id": task["id"],
-                "actor":"system"
-            }
-            save_task_data(**audit_data)
-            return f"Task deleted successfully for {task['id']} and title is {task['title']}"
-    return f"Task not present with id {id} or title {title}"
+    user_role = validate_token(token)
+    if user_role =="admin":
+        for task in task_data:
+            if task['id'] == id or title == task['title']:
+                task_data.remove(task)
+                audit_data = {
+                    "event_id": int(float(time.time())),
+                    "timestamp": f"{datetime.now()}",
+                    "action": "delete_task",
+                    "target_id": task["id"],
+                    "actor":"system"
+                }
+                save_task_data(**audit_data)
+                return f"Task deleted successfully for {task['id']} and title is {task['title']}"
+        return f"Task not present with id {id} or title {title}"
+    elif user_role == "viewer" or user_role == "editor":
+        return "You are not authorized to delete tasks"
+    else:
+        return "Invalid Token provided"
 
 
 #List Tasks by status
@@ -228,35 +266,40 @@ def list_tasks_by_priority(priority:str):
 
 # set_due_date for task 
 @mcp.tool()
-def set_due_date(task_id:int, due_at:str, title:str) -> dict:
+def set_due_date(token: str, task_id:int, due_at:str, title:str) -> dict:
     """ Set the due date for a task """
-    normalized_due_at = normalize_due_input(due_at)
-    if normalized_due_at is None:
-        return {
-            "ok": False,
-            "error": "Invalid due_at format. Use YYYY-MM-DD or ISO datetime.",
-        }
-
-    for task in task_data:
-        if task["id"] == task_id or task["title"] == title:
-            task["due_at"] = normalized_due_at
-            task["updated_at"] = f"{datetime.now()}"
-            audit_data = {
-                "event_id": int(float(time.time())),
-                "timestamp": f"{datetime.now()}",
-                "action": "set_due_date",
-                "target_id": task["id"],
-                "actor":"system"
-            }
-            save_task_data(**audit_data)
+    user_role = validate_token(token)
+    if user_role =="editor" or user_role == "admin":
+        normalized_due_at = normalize_due_input(due_at)
+        if normalized_due_at is None:
             return {
-                "ok": True,
-                "task_id": task["id"],
-                "title": task["title"],
-                "due_at": task["due_at"],
+                "ok": False,
+                "error": "Invalid due_at format. Use YYYY-MM-DD or ISO datetime.",
             }
-    return {"ok": False, "error": f"Task not present with id {task_id} or title {title}"}
 
+        for task in task_data:
+            if task["id"] == task_id or task["title"] == title:
+                task["due_at"] = normalized_due_at
+                task["updated_at"] = f"{datetime.now()}"
+                audit_data = {
+                    "event_id": int(float(time.time())),
+                    "timestamp": f"{datetime.now()}",
+                    "action": "set_due_date",
+                    "target_id": task["id"],
+                    "actor":"system"
+                }
+                save_task_data(**audit_data)
+                return {
+                    "ok": True,
+                    "task_id": task["id"],
+                    "title": task["title"],
+                    "due_at": task["due_at"],
+                }
+        return {"ok": False, "error": f"Task not present with id {task_id} or title {title}"}
+    elif user_role == "viewer" :
+        return "You are not authorized to set due date for tasks"
+    else:
+        return "Invalid Token provided"
 
 #List Overdue Tasks
 @mcp.tool()
